@@ -1,0 +1,27 @@
+Cryptocurrencies-Ex1
+
+Name: Eli Levinkopf
+ID: 205821879
+Login: eli.levinkopf
+
+In this exercise the realization of 4 classes:
+1.  Class Transition: this class represents a transaction that moves a single coin.
+    The class has getters for fields and method that return the TxID of the transaction.
+2.  Class Block: this class represents a block that can store  multiple transactions.
+    The class has methods that return the blockhash of the block, all transactions in the block
+    and the hashblock of the previous block.
+3.  Class Bank: this class represents a bank that controls in the blockchain.
+    The class has methods for:
+    - Adding a new transaction to mempool.
+    - Return the block according to hashblock.
+    - Return the largest block in the blockchain.
+    - Create money
+    - End day that close that adding transactions to the block, add the block to the blockchain
+      and update the mempool/UTxO.
+4.  Class Wallet: this class represents a walle/user with a private and public keys.
+    The class has methods for:
+    - Updating the wallet. That is, reduces one (coin) if the user spent and adds one if received.
+    - Create a transaction. That is, received a public key and create a new transaction from the 
+      current for a user who owns the public key.
+    - unfreeze all. This method unffreeze all transactions that not spend yet.
+    - Get addresses that return the public key of the current user/wallet.
