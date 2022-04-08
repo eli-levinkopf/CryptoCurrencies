@@ -1,5 +1,5 @@
 import sys
-sys.path.append('/Users/elilevinkopf/Documents/Ex22B/Cryptocurrencies/Cryptocurrencies-Ex1')
+sys.path.append('/Users/elilevinkopf/Documents/Ex22B/Cryptocurrencies/Cryptocurrencies_ex1')
 import pytest
 from ex1 import Transaction, Wallet, Bank
 
