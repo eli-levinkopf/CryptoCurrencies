@@ -1,6 +1,9 @@
 from .utils import PublicKey, Signature, TxID
 from typing import Optional
+<<<<<<< HEAD
 import hashlib
+=======
+>>>>>>> 9d7dcba9d7f7c8bf518f932470a08ea5fb0c2e99
 
 
 class Transaction:
@@ -14,6 +17,7 @@ class Transaction:
         self.input: Optional[TxID] = tx_input
         # DO NOT change these field names.
         self.signature: Signature = signature
+<<<<<<< HEAD
         # self._message = output
         self._message = self.output + self.input if self.input else self.output
 
@@ -28,6 +32,8 @@ class Transaction:
 
     def get_message(self) -> bytes:
         return self._message
+=======
+>>>>>>> 9d7dcba9d7f7c8bf518f932470a08ea5fb0c2e99
 
     def get_txid(self) -> TxID:
         """
@@ -35,10 +41,14 @@ class Transaction:
         This function is used by the tests to compute the tx hash. Make sure to compute this every time 
         directly from the data in the transaction object, and not cache the result
         """
+<<<<<<< HEAD
         txid = hashlib.sha256()
         txid.update(self._message + self.signature)
         return TxID(txid.digest())
         
+=======
+        raise NotImplementedError()
+>>>>>>> 9d7dcba9d7f7c8bf518f932470a08ea5fb0c2e99
 
 
 """

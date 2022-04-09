@@ -1,11 +1,15 @@
 from .utils import *
 from .block import Block
 from .transaction import Transaction
+<<<<<<< HEAD
 from typing import Dict, Set, Optional, List
 
 CONECTION_ERROR = "node can't connect to itself"
 BLOCK_HASH_ERROR = "block hash does not exist in blockchain"
 LATEST_HASH_ERROR = "The blockchain does not contain any blocks"
+=======
+from typing import Set, Optional, List
+>>>>>>> 9d7dcba9d7f7c8bf518f932470a08ea5fb0c2e99
 
 
 class Node:
@@ -13,6 +17,7 @@ class Node:
         """Creates a new node with an empty mempool and no connections to others.
         Blocks mined by this node will reward the miner with a single new coin,
         created out of thin air and associated with the mining reward address"""
+<<<<<<< HEAD
         # {Tx: True iff node.public_key is the output of Tx}
         self.__mempool: List[Transaction, bool] = []
         self.__blockchain: List[Block] = []
@@ -21,6 +26,9 @@ class Node:
         self.__private_key,  self.__public_key = gen_keys()
         self.__balance: int = 0
         self.__blocks_hash: List[BlockHash] = []
+=======
+        raise NotImplementedError()
+>>>>>>> 9d7dcba9d7f7c8bf518f932470a08ea5fb0c2e99
 
     def connect(self, other: 'Node') -> None:
         """connects this node to another node for block and transaction updates.
@@ -28,6 +36,7 @@ class Node:
         Raises an exception if asked to connect to itself.
         The connection itself does not trigger updates about the mempool,
         but nodes instantly notify of their latest block to each other (see notify_of_block)"""
+<<<<<<< HEAD
         if other is self:
             raise ValueError (CONECTION_ERROR)
         self.__connections.add(other)
@@ -42,6 +51,17 @@ class Node:
     def get_connections(self) -> Set['Node']:
         """Returns a set containing the connections of this node."""
         return self.__connections
+=======
+        raise NotImplementedError()
+
+    def disconnect_from(self, other: 'Node') -> None:
+        """Disconnects this node from the other node. If the two were not connected, then nothing happens"""
+        raise NotImplementedError()
+
+    def get_connections(self) -> Set['Node']:
+        """Returns a set containing the connections of this node."""
+        raise NotImplementedError()
+>>>>>>> 9d7dcba9d7f7c8bf518f932470a08ea5fb0c2e99
 
     def add_transaction_to_mempool(self, transaction: Transaction) -> bool:
         """
@@ -53,6 +73,7 @@ class Node:
 
         If the transaction is added successfully, then it is also sent to neighboring nodes.
         """
+<<<<<<< HEAD
         # TDDT: sender
         sender = None 
         if not verify(transaction.get_message(), transaction.get_signature(), sender.get_output()):
@@ -67,6 +88,9 @@ class Node:
             neighbor.add_transaction_to_mempool(transaction)
         return True
         
+=======
+        raise NotImplementedError()
+>>>>>>> 9d7dcba9d7f7c8bf518f932470a08ea5fb0c2e99
 
     def notify_of_block(self, block_hash: BlockHash, sender: 'Node') -> None:
         """This method is used by a node's connection to inform it that it has learned of a
@@ -87,10 +111,14 @@ class Node:
         transactions that were rolled back and can still be executed are re-introduced into the mempool if they do
         not conflict.
         """
+<<<<<<< HEAD
         if block_hash not in self.__blocks_hash:
             pass
 
         
+=======
+        raise NotImplementedError()
+>>>>>>> 9d7dcba9d7f7c8bf518f932470a08ea5fb0c2e99
 
     def mine_block(self) -> BlockHash:
         """"
@@ -109,31 +137,47 @@ class Node:
         This function returns a block object given its hash.
         If the block doesnt exist, a ValueError is raised.
         """
+<<<<<<< HEAD
         for block in self.__blockchain:
             if block.get_block_hash() == block_hash:
                 return block
         raise ValueError(BLOCK_HASH_ERROR)
+=======
+        raise NotImplementedError()
+>>>>>>> 9d7dcba9d7f7c8bf518f932470a08ea5fb0c2e99
 
     def get_latest_hash(self) -> BlockHash:
         """
         This function returns the last block hash known to this node (the tip of its current chain).
         """
+<<<<<<< HEAD
         try:
             return self.__blockchain[-1].get_block_hash()
         except:
             raise ValueError(LATEST_HASH_ERROR)
+=======
+        raise NotImplementedError()
+>>>>>>> 9d7dcba9d7f7c8bf518f932470a08ea5fb0c2e99
 
     def get_mempool(self) -> List[Transaction]:
         """
         This function returns the list of transactions that didn't enter any block yet.
         """
+<<<<<<< HEAD
         return list(self.__mempool.keys())
+=======
+        raise NotImplementedError()
+>>>>>>> 9d7dcba9d7f7c8bf518f932470a08ea5fb0c2e99
 
     def get_utxo(self) -> List[Transaction]:
         """
         This function returns the list of unspent transactions.
         """
+<<<<<<< HEAD
         return self.__utxo
+=======
+        raise NotImplementedError()
+>>>>>>> 9d7dcba9d7f7c8bf518f932470a08ea5fb0c2e99
 
     # ------------ Formerly wallet methods: -----------------------
 
@@ -148,6 +192,7 @@ class Node:
 
         The transaction is added to the mempool (and as a result is also published to neighboring nodes)
         """
+<<<<<<< HEAD
         available_tx = None
         for tx in self.__utxo:
             if tx not in self.__mempool:
@@ -163,12 +208,19 @@ class Node:
             neighbor.add_transaction_to_mempool(tx)
 
         return tx
+=======
+        raise NotImplementedError()
+>>>>>>> 9d7dcba9d7f7c8bf518f932470a08ea5fb0c2e99
 
     def clear_mempool(self) -> None:
         """
         Clears the mempool of this node. All transactions waiting to be entered into the next block are gone.
         """
+<<<<<<< HEAD
         self.__mempool = []
+=======
+        raise NotImplementedError()
+>>>>>>> 9d7dcba9d7f7c8bf518f932470a08ea5fb0c2e99
 
     def get_balance(self) -> int:
         """
@@ -176,12 +228,17 @@ class Node:
         Coins that the node owned and sent away will still be considered as part of the balance until the spending
         transaction is in the blockchain.
         """
+<<<<<<< HEAD
         return self.__balance
+=======
+        raise NotImplementedError()
+>>>>>>> 9d7dcba9d7f7c8bf518f932470a08ea5fb0c2e99
 
     def get_address(self) -> PublicKey:
         """
         This function returns the public address of this node (its public key).
         """
+<<<<<<< HEAD
         return self.__public_key
 
     # ------------ Privet methods: -----------------------
@@ -189,6 +246,9 @@ class Node:
     def __one_directional_connect(self,  other: 'Node') -> None:
 
         pass
+=======
+        raise NotImplementedError()
+>>>>>>> 9d7dcba9d7f7c8bf518f932470a08ea5fb0c2e99
 
 
 """
