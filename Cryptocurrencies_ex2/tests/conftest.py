@@ -1,3 +1,5 @@
+import sys
+sys.path.append('/Users/elilevinkopf/Documents/Ex22B/Cryptocurrencies/Cryptocurrencies_ex2')
 import pytest
 from unittest.mock import Mock
 from typing import Callable, List
