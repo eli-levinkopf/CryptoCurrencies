@@ -1,7 +1,10 @@
+from re import U
 from .utils import *
 from .block import Block
 from .transaction import Transaction
 from typing import Dict, Set, Optional, List
+import secrets
+
 
 CONECTION_ERROR = "node can't connect to itself"
 BLOCK_HASH_ERROR = "block hash does not exist in blockchain"
@@ -14,13 +17,15 @@ class Node:
         Blocks mined by this node will reward the miner with a single new coin,
         created out of thin air and associated with the mining reward address"""
         # {Tx: True iff node.public_key is the output of Tx}
-        self.__mempool: List[Transaction, bool] = []
+        self.__private_key,  self.__public_key = gen_keys()
+        self.__mempool: List[Transaction] = []
         self.__blockchain: List[Block] = []
         self.__utxo: List[Transaction] = []
+        self.__my_utxo: Dict[Transaction, bool] = {}
         self.__connections: Set['Node'] = []
-        self.__private_key,  self.__public_key = gen_keys()
-        self.__balance: int = 0
         self.__blocks_hash: List[BlockHash] = []
+        self.__transactions_history: List[Transaction] = []
+        self.__balance: int = 0
 
     def connect(self, other: 'Node') -> None:
         """connects this node to another node for block and transaction updates.
@@ -55,10 +60,15 @@ class Node:
         """
         # TDDT: sender
         sender = None 
+        for tx in self.__utxo:
+            if tx.get_txid() == transaction.get_input():
+                sender= tx
+        if not sender: return False
+
         if not verify(transaction.get_message(), transaction.get_signature(), sender.get_output()):
             return False
 
-        if not transaction.get_input(): return False
+        # if not transaction.get_input(): return False
 
         for tx in self.__mempool:
             if tx.get_input == transaction.get_input(): return False
@@ -74,8 +84,10 @@ class Node:
         We assume the sender of the message is specified, so that the node can choose to request this block if
         it wishes to do so.
         (if it is part of a longer unknown chain, these blocks are requested as well, until reaching a known block).
-        Upon receiving new blocks, they are processed and and checked for validity (check all signatures, hashes,
+
+        Upon receiving new blocks, they are processed and checked for validity (check all signatures, hashes,
         block size , etc).
+
         If the block is on the longest chain, the mempool and utxo change accordingly.
         If the block is indeed the tip of the longest chain,
         a notification of this block is sent to the neighboring nodes of this node.
@@ -83,16 +95,56 @@ class Node:
 
         A reorg may be triggered by this block's introduction. In this case the utxo is rolled back to the split point,
         and then rolled forward along the new branch.
+
         the mempool is similarly emptied of transactions that cannot be executed now.
         transactions that were rolled back and can still be executed are re-introduced into the mempool if they do
         not conflict.
         """
-        if block_hash not in self.__blocks_hash:
-            pass
+        curr_block_hash = self.get_latest_hash()
+        known = False
+        new_blockchain = []
+            
+        # check if we known the given block
+        while curr_block_hash != block_hash and curr_block_hash != GENESIS_BLOCK_PREV:
+            curr_block_hash = self.get_block(curr_block_hash).get_prev_block_hash()
 
+        while block_hash != GENESIS_BLOCK_PREV and not known:
+            # the block is unknown to the current Node
+            if not known:
+                unknown_block = sender.get_block(block_hash) # The unknown block is requested
+                if self.__verify_block(unknown_block, sender): # check if the block is valid
+                    new_blockchain.insert(0, unknown_block) # save the new block
+                curr_block_hash = self.get_latest_hash() # B 
+                block_hash = unknown_block.get_prev_block_hash() # Hash of the previous block of the unknown block (new block)
+                # check if we known the previous block of the new (unknown) block
+                while curr_block_hash != block_hash and curr_block_hash != GENESIS_BLOCK_PREV:
+                    curr_block_hash = self.get_block(curr_block_hash).get_prev_block_hash()
 
-
+            if curr_block_hash != GENESIS_BLOCK_PREV:
+                known = True
+                known_block_idx = self.__blockchain.index(unknown_block)
         
+
+        if not known:  # All the blocks in the blockchain of block_hash are unknown for current node
+            if len(self.__blockchain) < len(new_blockchain):
+                self.__blockchain = new_blockchain
+                
+
+                for block in self.__blockchain:
+                    for tx in block.get_transactions():
+                        self.__utxo.append(tx)
+                # self.__mempool = sender.get_mempool()
+
+                
+                self.__notify_of_block_to_connections(block_hash)
+                
+        # There is a block that the current node knows. and the knows block is chained to a longer chain
+        elif len(self.__blockchain[known_block_idx:]) < len(new_blockchain): 
+            self.__blockchain += new_blockchain
+            self.__notify_of_block_to_connections(block_hash)
+            
+    def set_utxo(self, utxo: List[Transaction]) -> None:
+        self.__utxo = utxo
 
     def mine_block(self) -> BlockHash:
         """"
@@ -104,7 +156,23 @@ class Node:
         If a new block is created, all connections of this node are notified by calling their notify_of_block() method.
         The method returns the new block hash (or None if there was no block)
         """
-        raise NotImplementedError()
+        signature=Signature(secrets.token_bytes(48))
+        miner_transaction = Transaction(output=self.__public_key, tx_input=None, signature=signature)
+        self.__my_utxo[miner_transaction] = True
+        self.__utxo.append(miner_transaction)
+        self.__balance+=1
+        if (len(self.__mempool) >= BLOCK_SIZE - 1):
+            transactions = self.__mempool[:BLOCK_SIZE - 1] + [miner_transaction]      
+        else: 
+            transactions = self.__mempool + [miner_transaction]      
+        new_block = Block(prev_block_hash = GENESIS_BLOCK_PREV, transactions=transactions)
+        self.__blockchain.insert(0, new_block)
+        self.__transactions_history += transactions
+        block_hash = new_block.get_block_hash()
+        for neighbor in self.__connections:
+            neighbor.notify_of_block(block_hash=block_hash, sender=self)
+        return new_block.get_block_hash()
+
 
     def get_block(self, block_hash: BlockHash) -> Block:
         """
@@ -123,13 +191,14 @@ class Node:
         try:
             return self.__blockchain[-1].get_block_hash()
         except:
-            raise ValueError(LATEST_HASH_ERROR)
+            return GENESIS_BLOCK_PREV
 
     def get_mempool(self) -> List[Transaction]:
         """
         This function returns the list of transactions that didn't enter any block yet.
         """
-        return list(self.__mempool.keys())
+        # TODO:
+        return list(self.__mempool)
 
     def get_utxo(self) -> List[Transaction]:
         """
@@ -151,15 +220,15 @@ class Node:
         The transaction is added to the mempool (and as a result is also published to neighboring nodes)
         """
         available_tx = None
-        for tx in self.__utxo:
-            if tx not in self.__mempool:
+        for tx in self.__my_utxo.keys():
+            if self.__my_utxo[tx]:
                 available_tx = tx
+                self.__my_utxo[available_tx] = False
         if not available_tx: return None
-        
+
         txid = available_tx.get_txid()
         signature = sign(target + txid,  self.__private_key)
-        tx = Transaction(output=target, input=txid, signature=signature)
-        # TODO: delete tx from self.__utxo?
+        tx = Transaction(output=target, tx_input=txid, signature=signature)
         self.__mempool.append(tx)
         for neighbor in self.__connections:
             neighbor.add_transaction_to_mempool(tx)
@@ -170,6 +239,7 @@ class Node:
         """
         Clears the mempool of this node. All transactions waiting to be entered into the next block are gone.
         """
+
         self.__mempool = []
 
     def get_balance(self) -> int:
@@ -186,7 +256,45 @@ class Node:
         """
         return self.__public_key
 
-    # ------------ Privet methods: -----------------------
+    # TODO: replace with blockchain
+    def transactions_history(self) -> List[Transaction]:
+        return self.__transactions_history
+
+    def get_blockchain(self) -> List[Block]:
+        return self.__blockchain
+
+    # ------------ Privet methods: ------------------------
+
+    def __verify_block(self, block: Block, sender: 'Node') -> bool:
+        """
+        Upon receiving new blocks, they are processed and checked for validity (check all signatures, hashes,
+        block size , etc).
+        """
+        block_transactions = block.get_transactions()
+        miner_award = sum([1 for tx in block_transactions if not tx.get_input()])
+        if len(block_transactions) > BLOCK_SIZE or miner_award != 1:
+            return False
+        
+        for transaction in block_transactions:
+            for tx in self.transactions_history(): # check if transaction make double spend
+                if tx.get_input() == transaction.get_input():
+                    return False
+            input_tx = None
+            # for tx in sender.transactions_history(): # find the the sender of this transaction
+            #     if tx.get_txid() == transaction.get_input():
+            #         input_tx = tx 
+            # if not input_tx and not transaction.get_input(): # minner tx case
+            #     continue
+            # # verify the signature
+            # if not input_tx or not verify(transaction.get_message, transaction.get_signature, input_tx.get_output()):
+            #     return False
+        return True
+
+
+    def __notify_of_block_to_connections(self, block_hash: BlockHash) -> None:
+        # sent a notification of this block to the neighboring nodes of this node
+        for neighbor in self.__connections: 
+            neighbor.notify_of_block(block_hash)
 
     def __one_directional_connect(self,  other: 'Node') -> None:
 

@@ -14,8 +14,14 @@ class Transaction:
         self.input: Optional[TxID] = tx_input
         # DO NOT change these field names.
         self.signature: Signature = signature
-        # self._message = output
-        self._message = self.output + self.input if self.input else self.output
+        self._message = output
+        # self._message = self.output + self.input if self.input else self.output
+        if tx_input: 
+            self._message += tx_input
+            self.__minner_tx = False
+        else: 
+            self.__minner_tx = True
+        
 
     def get_output(self) -> PublicKey:
         return self.output
@@ -28,6 +34,9 @@ class Transaction:
 
     def get_message(self) -> bytes:
         return self._message
+
+    def get_minner_tx(self):
+        return self.__minner_tx
 
     def get_txid(self) -> TxID:
         """
