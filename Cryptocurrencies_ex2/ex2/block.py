@@ -7,9 +7,6 @@ import hashlib
 class Block:
     """This class represents a block."""
 
-    # implement __init__ as you see fit.
-
-    # def __init__(self, transaction: List[Transaction] = [], prev_block_hash: BlockHash = GENESIS_BLOCK_PREV) -> None:
     def __init__(self, prev_block_hash: BlockHash = GENESIS_BLOCK_PREV,transactions: List[Transaction] = []) -> None:
         self.__transactions: List[Transaction] = transactions
         self.__prev_block_hash: BlockHash = prev_block_hash
