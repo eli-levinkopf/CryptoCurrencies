@@ -16,12 +16,10 @@ class Node:
         """Creates a new node with an empty mempool and no connections to others.
         Blocks mined by this node will reward the miner with a single new coin,
         created out of thin air and associated with the mining reward address"""
-        # {Tx: True iff node.public_key is the output of Tx}
         self.__private_key,  self.__public_key = gen_keys()
         self.__mempool: List[Transaction] = []
         self.__blockchain: List[Block] = []
         self.__utxo: Dict[Transaction, bool] = {}
-        self.__tmp_utxo: List[Transaction] = []
         self.__my_utxo: Dict[Transaction, bool] = {}
         self.__connections: Set['Node'] = set()
         self.__balance: int = 0
@@ -66,6 +64,7 @@ class Node:
             if self.__utxo[tx] and tx.get_txid() == transaction.get_input():
                 self.__utxo[tx] = False
                 sender= tx
+                break
         if not sender: return False
 
         if not verify(transaction.get_message(), transaction.get_signature(), sender.get_output()):
@@ -116,7 +115,7 @@ class Node:
         while curr_block_hash != block_hash and curr_block_hash != GENESIS_BLOCK_PREV:
             curr_block_hash = self.get_block(curr_block_hash).get_prev_block_hash()
 
-        if curr_block_hash == block_hash: return # TODO: check
+        if curr_block_hash == block_hash: return 
 
         while block_hash != GENESIS_BLOCK_PREV and not known:
             # the block is unknown to the current Node
@@ -139,9 +138,10 @@ class Node:
         if not known:  # All the blocks in the blockchain of block_hash are unknown for current node
             if len(self.__blockchain) < len(new_blockchain):
                 if self.__verify_blockchain_and_update_utxo(new_blockchain, new_hashes): # verify and update utxo
+                    self.__update_balance(new_blockchain)
                     self.__blockchain = list(reversed(new_blockchain)) # replace blockchain
                     # self.__blockchain = (new_blockchain)
-                    self.__notify_of_block_to_connections(block_hash, sender) # updae all connections
+                    self.__notify_of_block_to_connections() # updae all connections
                 
         # There is a block that the current node knows, and the knows block is chained to a longer chain
         elif len(self.__blockchain[:known_block_idx]) < len(new_blockchain):
@@ -149,19 +149,9 @@ class Node:
             if self.__verify_blockchain_for_split(new_blockchain, new_hashes, known_block_idx):
                 self.__update_utxo(new_blockchain, known_block_idx) # update utxo
                 self.__update_mempool(new_blockchain) # update mempool
-                # self.__blockchain += new_blockchain
+                self.__update_balance(new_blockchain) # update balance
                 self.__blockchain = list(reversed(new_blockchain)) + self.__blockchain[known_block_idx:] # update blockchain
-              
-                # utxo = [tx for block in self.__blockchain for tx in block.get_transactions()]
-                # to_del = []
-                # for tx in self.__utxo:
-                #     if tx not in utxo:
-                #         to_del.append(tx)
-                # for tx in to_del:
-                #     del self.__utxo[tx]
-
-                # self.__blockchain = list(reversed(self.__blockchain))
-                self.__notify_of_block_to_connections(block_hash, sender) # updae all connections
+                self.__notify_of_block_to_connections() # updae all connections
 
 
     def mine_block(self) -> BlockHash:
@@ -183,7 +173,9 @@ class Node:
         if len(self.__mempool) >= BLOCK_SIZE - 1:
             transactions = self.__mempool[:BLOCK_SIZE - 1] + [miner_transaction]      
         else: 
-            transactions = self.__mempool + [miner_transaction]  
+            transactions = self.__mempool + [miner_transaction] 
+        self.__update_mempool_utxo_balance(transactions)
+
         hash_block = self.get_latest_hash()    
         new_block = Block(prev_block_hash = hash_block, transactions=transactions)
         self.__blockchain.insert(0, new_block)
@@ -239,20 +231,6 @@ class Node:
 
         The transaction is added to the mempool (and as a result is also published to neighboring nodes)
         """
-        # available_txid = None
-        # for txid in self.__my_utxo.keys():
-        #     if self.__my_utxo[txid]:
-        #         available_txid = txid
-        #         self.__my_utxo[available_txid] = False
-        # if not available_txid: return None
-
-        # signature = sign(target + available_txid,  self.__private_key)
-        # tx = Transaction(output=target, tx_input=available_txid, signature=signature)
-        # self.__mempool.append(tx)
-        # self.__utxo.append(tx)
-        # for neighbor in self.__connections:
-        #     neighbor.add_transaction_to_mempool(tx)
-
         available_tx = None
         for tx in self.__my_utxo.keys():
             if self.__my_utxo[tx]:
@@ -309,10 +287,6 @@ class Node:
         """
         return self.__public_key
 
-    # TODO: delete 
-    def get_blockchain(self) -> List[Block]:
-        return self.__blockchain
-
     # ------------ Privet methods: ------------------------
 
     def __verify_blockchain_and_update_utxo(self, new_blockchain: List[Block], new_hashes: List[BlockHash]) -> bool:
@@ -333,8 +307,19 @@ class Node:
         if len(self.__blockchain) >= len(new_blockchain[:inx]): return False
         for block in new_blockchain[inx:]:
             new_blockchain.remove(block) # remove invalid blocks
-        # TODO: 
-        # self.__utxo = tmp_utxo
+        
+        utxo = self.__initialize_tmp_utxo(new_blockchain)
+        tx_to_del = []
+        for tx in self.__utxo:
+            if tx not in utxo:
+                tx_to_del.append(tx)
+        for tx in tx_to_del:
+            del self.__utxo[tx]
+            if tx in self.__my_utxo.keys() and self.__my_utxo[tx]: 
+                del self.__my_utxo[tx] # delete transaction from the shortest chain
+                if self.__balance:
+                    self.__balance -= 1
+
         self.__utxo = {tx: True for tx in tmp_utxo}
         return True
 
@@ -348,7 +333,7 @@ class Node:
                 break
 
             for tx in block.get_transactions():
-                if not tx.get_input(): continue
+                if not tx or not tx.get_input(): continue
                 tx_sender = self.__get_tx_sender(tx, tmp_utxo)
                 # if not tx_sender: print("no sender")
                 if not tx_sender or not verify(tx.get_message(), tx.get_signature(), tx_sender.get_output()):
@@ -364,7 +349,7 @@ class Node:
 
     def __verify_block(self, block: Block, hash :BlockHash) -> bool:
         block_transactions = block.get_transactions()
-        miner_award = sum(1 for tx in block_transactions if not tx.get_input()) # miner_award per block most to be 1
+        miner_award = sum(1 for tx in block_transactions if tx and not tx.get_input()) # miner_award per block most to be 1
         if block.get_block_hash() != hash or len(block_transactions) > BLOCK_SIZE or miner_award != 1:
              return False
         return True
@@ -381,7 +366,6 @@ class Node:
     def __initialize_tmp_utxo(self, new_blockchain: List[Block], split: int=-1) -> List[Transaction]:
         utxo = [tx for block in new_blockchain for tx in block.get_transactions()]
         if split >= 0 :
-            # TODO: split+1 ?
             utxo += [tx for block in  self.__blockchain for tx in block.get_transactions()]
         return utxo
 
@@ -393,23 +377,24 @@ class Node:
             for tx in block.get_transactions():
                 if tx.get_input() in my_txid: # current block is the input of tx
                     self.__my_utxo[tx] = True
-                    # TODO: balance++
                 elif tx in self.__utxo:
-                    # del self.__utxo[tx]
                     self.__utxo[tx] = False
 
-        # self.__utxo += tmp_utxo
         for tx in tmp_utxo:
             self.__utxo[tx] = True
 
         utxo = [tx for block in list(reversed(new_blockchain)) + 
                 self.__blockchain[known_block_idx:] for tx in block.get_transactions()]
-        to_del = []
+        tx_to_del = []
         for tx in self.__utxo:
             if tx not in utxo:
-                to_del.append(tx)
-        for tx in to_del:
+                tx_to_del.append(tx)
+        for tx in tx_to_del:
             del self.__utxo[tx]
+            if tx in self.__my_utxo.keys() and self.__my_utxo[tx]: 
+                if self.__balance:
+                    self.__balance -= 1
+        
 
     def __update_mempool(self, new_blockchain: List[Block]) -> None:
         for block in new_blockchain:
@@ -417,13 +402,41 @@ class Node:
                 if tx in self.__mempool:
                     self.__mempool.remove(tx)
 
+    
+    def __update_balance(self, new_blockchain: List[Block]) -> None: 
+        transactions = [tx for block in new_blockchain for tx in block.get_transactions()]
+        for tx in transactions:
+            if tx and tx.get_output() == self.get_address():
+                if self.__utxo[tx]:
+                    self.__balance += 1
+                    self.__utxo[tx] = False
+
  
 
-    def __notify_of_block_to_connections(self, block_hash: BlockHash, sender: 'Node') -> None:
+    def __notify_of_block_to_connections(self) -> None:
         # sent a notification of this block to the neighboring nodes of this node
         for neighbor in self.__connections: 
-            neighbor.notify_of_block(block_hash, self)
+            neighbor.notify_of_block(self.get_latest_hash(), self)
 
+
+    def __update_mempool_utxo_balance(self, transactions: List[Transaction]) -> None:
+        # delelte transactions from mempool
+        to_del_from_mempool = []
+        for tx in self.__mempool: 
+            if tx in transactions:
+                to_del_from_mempool.append(tx)
+        for tx in to_del_from_mempool:
+            self.__mempool.remove(tx) 
+        # balance from transactions
+        to_del = []
+        for tx in transactions:
+            for utxo in self.__my_utxo.keys():
+                if utxo.get_txid() == tx.get_input() and self.__balance:
+                    self.__balance -= 1
+                    to_del.append(tx)
+        # for tx in to_del:
+            # del self.__utxo[tx]
+            # del self.__my_utxo[tx] # why doesn work? 
 
 
 """

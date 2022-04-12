@@ -56,7 +56,7 @@ def f1():
 
 
 if __name__ == '__main__':
-    block = Block()
+    # block = Block()
     alice = Node()
     bob = Node()
     charlie = Node()
@@ -74,35 +74,49 @@ if __name__ == '__main__':
     # alice.notify_of_block(block3.get_block_hash(), evil_node)
 
     
-    alice.connect(bob)
+    for i in range(5):
+        alice.mine_block()
     alice.connect(charlie)
-    alice.mine_block()
     alice.disconnect_from(charlie)
-    tx1 = alice.create_transaction(bob.get_address())
-    alice.mine_block()
-    alice.disconnect_from(bob)
-    # print(alice.get_utxo())
-    # print(bob.get_utxo())
-    # print(charlie.get_utxo())
-    # print(tx1)
-    
-    assert tx1 in bob.get_utxo()
-    assert tx1 in alice.get_utxo()
 
+    for i in range(5):
+        alice.mine_block()
+        charlie.mine_block()
+
+    assert alice.get_balance() == 10
+    assert charlie.get_balance() == 5
+
+    for i in range(10):
+        tx = alice.create_transaction(bob.get_address())
+        charlie.add_transaction_to_mempool(tx)  # should accept only the 5 that appear
+        # in the utxo
+
+    bob.connect(alice)
+    assert alice.get_balance() == 10
+    assert bob.get_balance() == 0
+    assert charlie.get_balance() == 5
+
+    alice.mine_block()
     charlie.mine_block()
     charlie.mine_block()
+
+    alice_balance = alice.get_balance()
+    assert alice_balance == 2
+    assert bob.get_balance() == 9
+    assert charlie.get_balance() == 7
 
     alice.connect(charlie)
-    alice.clear_mempool()  # in case you restore transactions to mempool
-    # assert tx1 not in alice.get_utxo()
-    assert tx1 not in alice.get_mempool()
-    tx2 = alice.create_transaction(charlie.get_address())
-    assert tx2 is not None
-    assert tx2 in alice.get_mempool()
-    alice.mine_block()
-    alice.mine_block()
-    assert tx2 in alice.get_utxo()
-    alice.connect(bob)
-    assert tx2 in bob.get_utxo()
-    # assert tx1 not in bob.get_utxo() 
-    assert tx1 not in bob.get_mempool()
+    assert alice.get_balance() == 0
+    assert bob.get_balance() == 5
+    assert charlie.get_balance() == 7
+
+    # charlie.mine_block()
+    # assert alice.get_balance() == 0
+    # assert bob.get_balance() == 5
+    # assert charlie.get_balance() == 8
+
+
+    # d1 = {'a': 1, 'b': 2}
+    # d2 = {'c': 3, 'd': 4}
+    # d1 = {**d1, **d2}
+    # print(d1)

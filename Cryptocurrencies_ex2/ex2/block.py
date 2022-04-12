@@ -18,7 +18,8 @@ class Block:
         block_hash = hashlib.sha256()
         if self.__transactions:
             for tx in self.__transactions:
-                block_hash.update(tx.get_txid())
+                if tx:
+                    block_hash.update(tx.get_txid())
         if self.__prev_block_hash:
             block_hash.update(self.__prev_block_hash)
         return BlockHash(block_hash.digest())

@@ -278,7 +278,7 @@ def test_tx_replaced_in_blockchain_when_double_spent(alice: Node, bob: Node, cha
 
     alice.connect(charlie)
     alice.clear_mempool()  # in case you restore transactions to mempool
-    # assert tx1 not in alice.get_utxo()
+    assert tx1 not in alice.get_utxo()
     assert tx1 not in alice.get_mempool()
     tx2 = alice.create_transaction(charlie.get_address())
     assert tx2 is not None
@@ -288,7 +288,7 @@ def test_tx_replaced_in_blockchain_when_double_spent(alice: Node, bob: Node, cha
     assert tx2 in alice.get_utxo()
     alice.connect(bob)
     assert tx2 in bob.get_utxo()
-    # assert tx1 not in bob.get_utxo() 
+    assert tx1 not in bob.get_utxo()
     assert tx1 not in bob.get_mempool()
 
 
@@ -305,3 +305,143 @@ def test_bob_serves_wrong_block(alice: Node, bob: Node, charlie: Node, monkeypat
     alice.connect(bob)
     assert alice.get_latest_hash() == GENESIS_BLOCK_PREV
     assert alice.get_utxo() == []
+
+
+def test_swiching_chain1(alice: Node, bob: Node, charlie: Node) -> None:
+    for i in range(5):
+        alice.mine_block()
+    alice.connect(bob)
+
+    assert alice.get_balance() == 5
+    assert bob.get_balance() == 0
+
+    bob.disconnect_from(alice)
+    for i in range(5):
+        alice.mine_block()
+    for i in range(10):
+        bob.mine_block()
+
+    assert alice.get_balance() == 10
+    assert bob.get_balance() == 10
+
+    bob.connect(alice)
+    assert alice.get_balance() == 5 
+    assert bob.get_balance() == 10
+
+    for i in range(15):
+        charlie.mine_block()
+
+    alice.connect(charlie)
+    assert alice.get_balance() == 5
+    assert bob.get_balance() == 10
+    assert charlie.get_balance() == 15
+
+    charlie.mine_block()
+
+    assert alice.get_balance() == 0
+    assert bob.get_balance() == 0
+    assert charlie.get_balance() == 16
+
+
+def test_swiching_chain2(alice: Node, bob: Node, charlie: Node) -> None:
+    alice.mine_block()
+    alice.connect(charlie)
+    alice.disconnect_from(charlie)
+    alice.mine_block()
+
+    assert alice.get_balance() == 2
+    assert bob.get_balance() == 0
+    assert charlie.get_balance() == 0
+
+    alice.connect(bob)
+    bob.mine_block()
+    bob.mine_block()
+    for i in range(4):
+        charlie.mine_block()
+    assert alice.get_balance() == 2
+    assert bob.get_balance() == 2
+    assert charlie.get_balance() == 4
+
+    charlie.connect(bob)
+    assert alice.get_balance() == 1
+    assert bob.get_balance() == 0
+    assert charlie.get_balance() == 4
+
+
+def test_swiching_chain3(alice: Node, bob: Node, charlie: Node) -> None:
+    for i in range(5):
+        alice.mine_block()
+    alice.connect(charlie)
+    alice.disconnect_from(charlie)
+
+    for i in range(5):
+        alice.mine_block()
+        charlie.mine_block()
+
+    assert alice.get_balance() == 10
+    assert charlie.get_balance() == 5
+
+    for i in range(10):
+        tx = alice.create_transaction(bob.get_address())
+        charlie.add_transaction_to_mempool(tx)  # should accept only the 5 that appear
+        # in the utxo
+
+    bob.connect(alice)
+    assert alice.get_balance() == 10
+    assert bob.get_balance() == 0
+    assert charlie.get_balance() == 5
+
+    alice.mine_block()
+    charlie.mine_block()
+    charlie.mine_block()
+
+    alice_balance = alice.get_balance()
+    assert alice_balance == 2
+    assert bob.get_balance() == 9
+    assert charlie.get_balance() == 7
+
+    alice.connect(charlie)
+    assert alice.get_balance() == 0
+    assert bob.get_balance() == 5
+    assert charlie.get_balance() == 7
+
+    charlie.mine_block()
+    assert alice.get_balance() == 0
+    assert bob.get_balance() == 5
+    assert charlie.get_balance() == 8
+
+
+def test_half_valid_chain(alice: Node, bob: Node, charlie: Node,
+                          evil_node_maker: EvilNodeMaker) -> None:
+    alice.mine_block()
+    alice.mine_block()
+    alice.create_transaction(charlie.get_address())
+    alice.create_transaction(charlie.get_address())
+    alice.mine_block()
+
+    alice.connect(charlie)
+    assert alice.get_balance() == 1
+    assert charlie.get_balance() == 2
+    charlie.disconnect_from(alice)
+
+    tx1 = charlie.create_transaction(alice.get_address())
+    tx2 = charlie.create_transaction(alice.get_address())
+
+    block1 = Block(alice.get_latest_hash(), [Transaction(
+        gen_keys()[1], None, Signature(secrets.token_bytes(64)))])
+    block2 = Block(block1.get_block_hash(), [Transaction(
+        gen_keys()[1], None, Signature(secrets.token_bytes(64))), tx1])
+    block3 = Block(block2.get_block_hash(), [Transaction(
+        gen_keys()[1], None, Signature(secrets.token_bytes(64))), tx2, tx1])  # should
+    # not accept this block
+    assert alice.get_balance() == 1
+
+    block_chain = [block1, block2, block3]
+    # block_chain = [block1, block2, block3]
+    eve = evil_node_maker(block_chain)
+    alice.notify_of_block(eve.get_latest_hash(), eve)
+
+    # assert alice.get_balance() == 2
+
+    # charlie.connect(alice)
+    # assert charlie.get_balance() == 1
