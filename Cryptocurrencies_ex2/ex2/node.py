@@ -1,3 +1,4 @@
+from re import T, U
 from .utils import *
 from .block import Block
 from .transaction import Transaction
@@ -19,7 +20,7 @@ class Node:
         self.__private_key,  self.__public_key = gen_keys()
         self.__mempool: List[Transaction] = []
         self.__blockchain: List[Block] = []
-        self.__utxo: List[Transaction] = []
+        self.__utxo: Dict[Transaction, bool] = {}
         self.__tmp_utxo: List[Transaction] = []
         self.__my_utxo: Dict[Transaction, bool] = {}
         self.__connections: Set['Node'] = set()
@@ -61,8 +62,9 @@ class Node:
         """
         # TDDT: sender
         sender = None 
-        for tx in self.__utxo:
-            if tx.get_txid() == transaction.get_input():
+        for tx in self.__utxo.keys():
+            if self.__utxo[tx] and tx.get_txid() == transaction.get_input():
+                self.__utxo[tx] = False
                 sender= tx
         if not sender: return False
 
@@ -163,7 +165,7 @@ class Node:
         miner_transaction = Transaction(output=self.__public_key, tx_input=None, signature=signature)
         # self.__my_utxo[miner_transaction.get_txid()] = True
         self.__my_utxo[miner_transaction] = True
-        self.__utxo.append(miner_transaction)
+        self.__utxo[miner_transaction] = True
         self.__balance+=1
         if len(self.__mempool) >= BLOCK_SIZE - 1:
             transactions = self.__mempool[:BLOCK_SIZE - 1] + [miner_transaction]      
@@ -208,7 +210,7 @@ class Node:
         """
         This function returns the list of unspent transactions.
         """
-        return self.__utxo
+        return list(self.__utxo.keys())
 
     # ------------ Formerly wallet methods: -----------------------
 
@@ -242,14 +244,14 @@ class Node:
             if self.__my_utxo[tx]:
                 available_tx = tx
                 self.__my_utxo[available_tx] = False
-                # self.__utxo.remove(available_tx) # ?
+                self.__utxo[available_tx] = False # ?
                 break
         if not available_tx: return None
 
         signature = sign(target + available_tx.get_txid(),  self.__private_key)
         tx = Transaction(output=target, tx_input=available_tx.get_txid(), signature=signature)
         self.__mempool.append(tx)
-        self.__utxo.append(tx)
+        self.__utxo[tx] = True
         for neighbor in self.__connections:
             neighbor.add_transaction_to_mempool(tx)
 
@@ -259,11 +261,25 @@ class Node:
         """
         Clears the mempool of this node. All transactions waiting to be entered into the next block are gone.
         """
-        my_txid = [tx.get_txid() for tx in self.__my_utxo.keys()]
+        to_del_from_utxo = []
+        to_del_from_my_utxo = []
         for tx in self.__mempool:
-            txid = tx.get_input()
-            if txid in my_txid:
-                self.__my_utxo[tx] = True
+            for utxo in self.__utxo.keys():
+                if utxo.get_txid() == tx.get_input():
+                    self.__utxo[utxo] = True
+                    if tx in self.__utxo:
+                        to_del_from_utxo.append(tx)
+            for utxo in self.__my_utxo: 
+                if utxo.get_txid() == tx.get_input():
+                    self.__my_utxo[utxo] = True
+                    if tx in self.__my_utxo:
+                        to_del_from_my_utxo.append(tx)
+
+        for tx in to_del_from_utxo:
+            del self.__utxo[tx]
+        for tx in to_del_from_my_utxo:
+            del self.__my_utxo[tx]
+
         self.__mempool = []
 
     def get_balance(self) -> int:
@@ -305,7 +321,8 @@ class Node:
         for block in new_blockchain[inx:]:
             new_blockchain.remove(block) # remove invalid blocks
         # TODO: 
-        self.__utxo = tmp_utxo
+        # self.__utxo = tmp_utxo
+        self.__utxo = {tx: True for tx in tmp_utxo}
         return True
 
     
@@ -359,9 +376,12 @@ class Node:
                     self.__my_utxo[tx] = True
                     # TODO: balance++
                 elif tx in self.__utxo:
-                    self.__utxo.remove(tx)
+                    # self.__utxo.remove(tx)
+                     self.__utxo[tx] = False
                     
-        self.__utxo += tmp_utxo
+        # self.__utxo += tmp_utxo
+        for tx in tmp_utxo:
+            self.__utxo[tx] = True
 
     def __update_mempool(self, new_blockchain: List[Block]) -> None:
         for block in new_blockchain:
