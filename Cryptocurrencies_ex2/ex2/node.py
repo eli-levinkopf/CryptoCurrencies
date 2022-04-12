@@ -21,7 +21,7 @@ class Node:
         self.__blockchain: List[Block] = []
         self.__utxo: List[Transaction] = []
         self.__tmp_utxo: List[Transaction] = []
-        self.__my_utxo: Dict[TxID, bool] = {}
+        self.__my_utxo: Dict[Transaction, bool] = {}
         self.__connections: Set['Node'] = set()
         self.__balance: int = 0
 
@@ -161,7 +161,8 @@ class Node:
         """
         signature=Signature(secrets.token_bytes(48))
         miner_transaction = Transaction(output=self.__public_key, tx_input=None, signature=signature)
-        self.__my_utxo[miner_transaction.get_txid()] = True
+        # self.__my_utxo[miner_transaction.get_txid()] = True
+        self.__my_utxo[miner_transaction] = True
         self.__utxo.append(miner_transaction)
         self.__balance+=1
         if len(self.__mempool) >= BLOCK_SIZE - 1:
@@ -222,16 +223,31 @@ class Node:
 
         The transaction is added to the mempool (and as a result is also published to neighboring nodes)
         """
-        available_txid = None
-        for txid in self.__my_utxo.keys():
-            if self.__my_utxo[txid]:
-                available_txid = txid
-                self.__my_utxo[available_txid] = False
-        if not available_txid: return None
+        # available_txid = None
+        # for txid in self.__my_utxo.keys():
+        #     if self.__my_utxo[txid]:
+        #         available_txid = txid
+        #         self.__my_utxo[available_txid] = False
+        # if not available_txid: return None
 
-        # txid = available_txid.get_txid()
-        signature = sign(target + available_txid,  self.__private_key)
-        tx = Transaction(output=target, tx_input=txid, signature=signature)
+        # signature = sign(target + available_txid,  self.__private_key)
+        # tx = Transaction(output=target, tx_input=available_txid, signature=signature)
+        # self.__mempool.append(tx)
+        # self.__utxo.append(tx)
+        # for neighbor in self.__connections:
+        #     neighbor.add_transaction_to_mempool(tx)
+
+        available_tx = None
+        for tx in self.__my_utxo.keys():
+            if self.__my_utxo[tx]:
+                available_tx = tx
+                self.__my_utxo[available_tx] = False
+                # self.__utxo.remove(available_tx) # ?
+                break
+        if not available_tx: return None
+
+        signature = sign(target + available_tx.get_txid(),  self.__private_key)
+        tx = Transaction(output=target, tx_input=available_tx.get_txid(), signature=signature)
         self.__mempool.append(tx)
         self.__utxo.append(tx)
         for neighbor in self.__connections:
@@ -243,10 +259,11 @@ class Node:
         """
         Clears the mempool of this node. All transactions waiting to be entered into the next block are gone.
         """
+        my_txid = [tx.get_txid() for tx in self.__my_utxo.keys()]
         for tx in self.__mempool:
             txid = tx.get_input()
-            if txid in self.__my_utxo.keys():
-                self.__my_utxo[txid] = True
+            if txid in my_txid:
+                self.__my_utxo[tx] = True
         self.__mempool = []
 
     def get_balance(self) -> int:
@@ -334,11 +351,12 @@ class Node:
 
     def __update_utxo(self, new_blockchain: List[Block], known_block_idx: int) -> None:
         tmp_utxo: List[Transaction] = self.__initialize_tmp_utxo(new_blockchain)
+        my_txid = [tx.get_txid() for tx in self.__my_utxo.keys()]
         # remove from utxo all transactions that are in the shortest subchain (blockchain[known_block_idx + 1:]) ?
         for block in self.__blockchain[known_block_idx + 1:]:
             for tx in block.get_transactions():
-                if tx.get_input() in self.__my_utxo: # current block is the input of tx
-                    self.__my_utxo[tx.get_input()] = True
+                if tx.get_input() in my_txid: # current block is the input of tx
+                    self.__my_utxo[tx] = True
                     # TODO: balance++
                 elif tx in self.__utxo:
                     self.__utxo.remove(tx)
