@@ -1,4 +1,4 @@
-from re import T, U
+from re import I, T, U
 from .utils import *
 from .block import Block
 from .transaction import Transaction
@@ -35,8 +35,8 @@ class Node:
         if other is self:
             raise ValueError (CONECTION_ERROR)
         self.__connections.add(other)
-        other.notify_of_block(self.get_latest_hash(), self)
         other.__connections.add(self)
+        other.notify_of_block(self.get_latest_hash(), self)
         self.notify_of_block(other.get_latest_hash(), other)
 
 
@@ -116,6 +116,8 @@ class Node:
         while curr_block_hash != block_hash and curr_block_hash != GENESIS_BLOCK_PREV:
             curr_block_hash = self.get_block(curr_block_hash).get_prev_block_hash()
 
+        if curr_block_hash == block_hash: return # TODO: check
+
         while block_hash != GENESIS_BLOCK_PREV and not known:
             # the block is unknown to the current Node
             if not known: 
@@ -138,16 +140,27 @@ class Node:
             if len(self.__blockchain) < len(new_blockchain):
                 if self.__verify_blockchain_and_update_utxo(new_blockchain, new_hashes): # verify and update utxo
                     self.__blockchain = list(reversed(new_blockchain)) # replace blockchain
+                    # self.__blockchain = (new_blockchain)
                     self.__notify_of_block_to_connections(block_hash, sender) # updae all connections
                 
         # There is a block that the current node knows, and the knows block is chained to a longer chain
-        elif len(self.__blockchain[known_block_idx + 1:]) < len(new_blockchain):
+        elif len(self.__blockchain[:known_block_idx]) < len(new_blockchain):
             # verify blocks
             if self.__verify_blockchain_for_split(new_blockchain, new_hashes, known_block_idx):
                 self.__update_utxo(new_blockchain, known_block_idx) # update utxo
                 self.__update_mempool(new_blockchain) # update mempool
-                self.__blockchain += new_blockchain # update blockchain
-                self.__blockchain = list(reversed(self.__blockchain))
+                # self.__blockchain += new_blockchain
+                self.__blockchain = list(reversed(new_blockchain)) + self.__blockchain[known_block_idx:] # update blockchain
+              
+                # utxo = [tx for block in self.__blockchain for tx in block.get_transactions()]
+                # to_del = []
+                # for tx in self.__utxo:
+                #     if tx not in utxo:
+                #         to_del.append(tx)
+                # for tx in to_del:
+                #     del self.__utxo[tx]
+
+                # self.__blockchain = list(reversed(self.__blockchain))
                 self.__notify_of_block_to_connections(block_hash, sender) # updae all connections
 
 
@@ -211,6 +224,7 @@ class Node:
         This function returns the list of unspent transactions.
         """
         return list(self.__utxo.keys())
+        # return list(tx for tx in self.__utxo.keys() if self.__utxo[tx] == True)
 
     # ------------ Formerly wallet methods: -----------------------
 
@@ -286,7 +300,6 @@ class Node:
         """
         This function returns the number of coins that this node owns according to its view of the blockchain.
         Coins that the node owned and sent away will still be considered as part of the balance until the spending
-        transaction is in the blockchain.
         """
         return self.__balance
 
@@ -296,7 +309,7 @@ class Node:
         """
         return self.__public_key
 
-
+    # TODO: delete 
     def get_blockchain(self) -> List[Block]:
         return self.__blockchain
 
@@ -327,21 +340,22 @@ class Node:
 
     
     def __verify_blockchain_for_split(self, new_blockchain: List[Block], new_hashes: List[BlockHash], known_block_idx: int) -> bool:
-        tmp_utxo: List[Transaction] = self.__initialize_tmp_utxo(new_blockchain)
+        tmp_utxo: List[Transaction] = self.__initialize_tmp_utxo(new_blockchain, split=known_block_idx)
         inx = len(new_blockchain)
         for block in new_blockchain:
             if not self.__verify_block(block, new_hashes[new_blockchain.index(block)]):
-                inx = len(new_blockchain)
+                inx = new_blockchain.index(block)
                 break
 
             for tx in block.get_transactions():
                 if not tx.get_input(): continue
                 tx_sender = self.__get_tx_sender(tx, tmp_utxo)
-                if not tx_sender or not verify(tx.get_message(), tx.get_signature(), tx.get_output()):
-                    inx = len(new_blockchain)
+                # if not tx_sender: print("no sender")
+                if not tx_sender or not verify(tx.get_message(), tx.get_signature(), tx_sender.get_output()):
+                    inx = new_blockchain.index(block)
                     break
                     
-        if len(self.__blockchain[known_block_idx + 1:]) >= len(new_blockchain): return False
+        if len(self.__blockchain[:known_block_idx]) >= len(new_blockchain[:inx]): return False
         for block in new_blockchain[inx:]:
             new_blockchain.remove(block)
         # self.__tmp_utxo = tmp_utxo
@@ -357,31 +371,45 @@ class Node:
 
 
     def __get_tx_sender(self, transaction: Transaction, utxo: List[Transaction]) -> Optional[Transaction]: 
+        tx = None
         for tx in utxo:
             if transaction.get_input() == tx.get_txid():
                 utxo.remove(tx)
                 return tx
         return False
 
-    def __initialize_tmp_utxo(self, new_blockchain: List[Block]) -> List[Transaction]:
-        return [tx for block in new_blockchain for tx in block.get_transactions()]
+    def __initialize_tmp_utxo(self, new_blockchain: List[Block], split: int=-1) -> List[Transaction]:
+        utxo = [tx for block in new_blockchain for tx in block.get_transactions()]
+        if split >= 0 :
+            # TODO: split+1 ?
+            utxo += [tx for block in  self.__blockchain for tx in block.get_transactions()]
+        return utxo
 
     def __update_utxo(self, new_blockchain: List[Block], known_block_idx: int) -> None:
-        tmp_utxo: List[Transaction] = self.__initialize_tmp_utxo(new_blockchain)
+        tmp_utxo: List[Transaction] = self.__initialize_tmp_utxo(new_blockchain, split=known_block_idx)
         my_txid = [tx.get_txid() for tx in self.__my_utxo.keys()]
         # remove from utxo all transactions that are in the shortest subchain (blockchain[known_block_idx + 1:]) ?
-        for block in self.__blockchain[known_block_idx + 1:]:
+        for block in self.__blockchain[:known_block_idx + 1]:
             for tx in block.get_transactions():
                 if tx.get_input() in my_txid: # current block is the input of tx
                     self.__my_utxo[tx] = True
                     # TODO: balance++
                 elif tx in self.__utxo:
-                    # self.__utxo.remove(tx)
-                     self.__utxo[tx] = False
-                    
+                    # del self.__utxo[tx]
+                    self.__utxo[tx] = False
+
         # self.__utxo += tmp_utxo
         for tx in tmp_utxo:
             self.__utxo[tx] = True
+
+        utxo = [tx for block in list(reversed(new_blockchain)) + 
+                self.__blockchain[known_block_idx:] for tx in block.get_transactions()]
+        to_del = []
+        for tx in self.__utxo:
+            if tx not in utxo:
+                to_del.append(tx)
+        for tx in to_del:
+            del self.__utxo[tx]
 
     def __update_mempool(self, new_blockchain: List[Block]) -> None:
         for block in new_blockchain:
