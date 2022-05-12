@@ -47,14 +47,4 @@ class Transaction:
         txid = hashlib.sha256()
         txid.update(self._message + self.signature)
         return TxID(txid.digest())
-        
-
-
-"""
-Importing this file should NOT execute code. It should only create definitions for the objects above.
-Write any tests you have in a different file.
-You may add additional methods, classes and files but be sure no to change the signatures of methods
-included in this template.
-"""
-
-
+    

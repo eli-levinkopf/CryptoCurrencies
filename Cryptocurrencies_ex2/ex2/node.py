@@ -1,4 +1,3 @@
-from re import I, T, U
 from .utils import *
 from .block import Block
 from .transaction import Transaction
@@ -58,7 +57,7 @@ class Node:
 
         If the transaction is added successfully, then it is also sent to neighboring nodes.
         """
-        # TDDT: sender
+        # Find the input (sender) in the mempool.
         sender = None 
         for tx in self.__utxo.keys():
             if self.__utxo[tx] and tx.get_txid() == transaction.get_input():
@@ -70,14 +69,11 @@ class Node:
         if not verify(transaction.get_message(), transaction.get_signature(), sender.get_output()):
             return False
 
+        # Check if the transaction try to double spend
         for tx in self.__mempool:
             if tx.get_input() == transaction.get_input(): return False
-
-        if transaction in self.__mempool: return False
-
-        for tx in self.__mempool:
-            if tx.get_input == transaction.get_input(): return False
         
+        # Add transaction to mempool and update node's connections
         self.__mempool.append(transaction)
         for neighbor in self.__connections:
             neighbor.add_transaction_to_mempool(transaction)
@@ -108,6 +104,7 @@ class Node:
         """
         curr_block_hash = self.get_latest_hash()
         known = False
+        known_block_idx = -1
         new_blockchain: List[Block]= []
         new_hashes: List[BlockHash]= []
             
@@ -135,23 +132,7 @@ class Node:
                 known = True
                 known_block_idx = self.__blockchain.index(self.get_block(curr_block_hash))
         
-        if not known:  # All the blocks in the blockchain of block_hash are unknown for current node
-            if len(self.__blockchain) < len(new_blockchain):
-                if self.__verify_blockchain_and_update_utxo(new_blockchain, new_hashes): # verify and update utxo
-                    self.__update_balance(new_blockchain)
-                    self.__blockchain = list(reversed(new_blockchain)) # replace blockchain
-                    # self.__blockchain = (new_blockchain)
-                    self.__notify_of_block_to_connections() # updae all connections
-                
-        # There is a block that the current node knows, and the knows block is chained to a longer chain
-        elif len(self.__blockchain[:known_block_idx]) < len(new_blockchain):
-            # verify blocks
-            if self.__verify_blockchain_for_split(new_blockchain, new_hashes, known_block_idx):
-                self.__update_utxo(new_blockchain, known_block_idx) # update utxo
-                self.__update_mempool(new_blockchain) # update mempool
-                self.__update_balance(new_blockchain) # update balance
-                self.__blockchain = list(reversed(new_blockchain)) + self.__blockchain[known_block_idx:] # update blockchain
-                self.__notify_of_block_to_connections() # updae all connections
+        self.__update_blockchain_if_split(new_blockchain, new_hashes, known_block_idx, known)
 
 
     def mine_block(self) -> BlockHash:
@@ -166,7 +147,6 @@ class Node:
         """
         signature=Signature(secrets.token_bytes(48))
         miner_transaction = Transaction(output=self.__public_key, tx_input=None, signature=signature)
-        # self.__my_utxo[miner_transaction.get_txid()] = True
         self.__my_utxo[miner_transaction] = True
         self.__utxo[miner_transaction] = True
         self.__balance+=1
@@ -176,10 +156,12 @@ class Node:
             transactions = self.__mempool + [miner_transaction] 
         self.__update_mempool_utxo_balance(transactions)
 
+        # Insert the new block into the blockchain.
         hash_block = self.get_latest_hash()    
         new_block = Block(prev_block_hash = hash_block, transactions=transactions)
         self.__blockchain.insert(0, new_block)
         block_hash = new_block.get_block_hash()
+        # Send the new block to the network (via neighboring nodes)
         for neighbor in self.__connections:
             neighbor.notify_of_block(block_hash=block_hash, sender=self)
         return new_block.get_block_hash()
@@ -208,7 +190,6 @@ class Node:
         """
         This function returns the list of transactions that didn't enter any block yet.
         """
-        # TODO:
         return list(self.__mempool)
 
     def get_utxo(self) -> List[Transaction]:
@@ -216,9 +197,6 @@ class Node:
         This function returns the list of unspent transactions.
         """
         return list(self.__utxo.keys())
-        # return list(tx for tx in self.__utxo.keys() if self.__utxo[tx] == True)
-
-    # ------------ Formerly wallet methods: -----------------------
 
     def create_transaction(self, target: PublicKey) -> Optional[Transaction]:
         """
@@ -232,14 +210,14 @@ class Node:
         The transaction is added to the mempool (and as a result is also published to neighboring nodes)
         """
         available_tx = None
+        # find available transaction.
         for tx in self.__my_utxo.keys():
             if self.__my_utxo[tx]:
                 available_tx = tx
-                self.__my_utxo[available_tx] = False
-                self.__utxo[available_tx] = False # ?
+                self.__my_utxo[available_tx], self.__utxo[available_tx] = False, False
                 break
         if not available_tx: return None
-
+        # create a new transaction and update.
         signature = sign(target + available_tx.get_txid(),  self.__private_key)
         tx = Transaction(output=target, tx_input=available_tx.get_txid(), signature=signature)
         self.__mempool.append(tx)
@@ -287,9 +265,35 @@ class Node:
         """
         return self.__public_key
 
-    # ------------ Privet methods: ------------------------
+    # ------------------------ Privet methods: ------------------------
+
+    def __update_blockchain_if_split(self, new_blockchain: List[Block], new_hashes: List[BlockHash], known_block_idx: int, known: bool) -> None:
+        """
+        This method is used to check if node splits its blockchain and reorg if split.
+        Update all connections if the node splits its blockchain.
+        """
+        if not known:  # All the blocks in the blockchain of block_hash are unknown for current node
+            if len(self.__blockchain) < len(new_blockchain):
+                if self.__verify_blockchain_and_update_utxo(new_blockchain, new_hashes): # verify and update utxo
+                    self.__update_balance(new_blockchain)
+                    self.__blockchain = list(reversed(new_blockchain)) # replace blockchain
+                    self.__notify_of_block_to_connections() # updae all connections
+                
+        # There is a block that the current node knows, and the knows block is chained to a longer chain
+        elif len(self.__blockchain[:known_block_idx]) < len(new_blockchain):
+            # verify blocks
+            if self.__verify_blockchain_for_split(new_blockchain, new_hashes, known_block_idx):
+                self.__update_utxo(new_blockchain, known_block_idx) # update utxo
+                self.__update_mempool(new_blockchain) # update mempool
+                self.__update_balance(new_blockchain) # update balance
+                self.__blockchain = list(reversed(new_blockchain)) + self.__blockchain[known_block_idx:] # update blockchain
+                self.__notify_of_block_to_connections() # updae all connections
 
     def __verify_blockchain_and_update_utxo(self, new_blockchain: List[Block], new_hashes: List[BlockHash]) -> bool:
+        """
+        This function verifies the new sub blockchain and reorg the blockchain.
+        This function used in case that the node wants to replace all blockchain
+        """
         tmp_utxo: List[Transaction] = self.__initialize_tmp_utxo(new_blockchain)
         inx = len(new_blockchain)
         for block in new_blockchain:
@@ -325,6 +329,10 @@ class Node:
 
     
     def __verify_blockchain_for_split(self, new_blockchain: List[Block], new_hashes: List[BlockHash], known_block_idx: int) -> bool:
+        """
+        This function verifies the new sub blockchain and reorg the blockchain.
+        This function used in case that the node wants split the blockchain in some point.
+        """
         tmp_utxo: List[Transaction] = self.__initialize_tmp_utxo(new_blockchain, split=known_block_idx)
         inx = len(new_blockchain)
         for block in new_blockchain:
@@ -335,7 +343,6 @@ class Node:
             for tx in block.get_transactions():
                 if not tx or not tx.get_input(): continue
                 tx_sender = self.__get_tx_sender(tx, tmp_utxo)
-                # if not tx_sender: print("no sender")
                 if not tx_sender or not verify(tx.get_message(), tx.get_signature(), tx_sender.get_output()):
                     inx = new_blockchain.index(block)
                     break
@@ -343,11 +350,13 @@ class Node:
         if len(self.__blockchain[:known_block_idx]) >= len(new_blockchain[:inx]): return False
         for block in new_blockchain[inx:]:
             new_blockchain.remove(block)
-        # self.__tmp_utxo = tmp_utxo
         return True
 
 
     def __verify_block(self, block: Block, hash :BlockHash) -> bool:
+        """
+        This function verifies a single block.
+        """
         block_transactions = block.get_transactions()
         miner_award = sum(1 for tx in block_transactions if tx and not tx.get_input()) # miner_award per block most to be 1
         if block.get_block_hash() != hash or len(block_transactions) > BLOCK_SIZE or miner_award != 1:
@@ -370,9 +379,12 @@ class Node:
         return utxo
 
     def __update_utxo(self, new_blockchain: List[Block], known_block_idx: int) -> None:
+        """
+        This function updates the utxo of a node.
+        """
         tmp_utxo: List[Transaction] = self.__initialize_tmp_utxo(new_blockchain, split=known_block_idx)
         my_txid = [tx.get_txid() for tx in self.__my_utxo.keys()]
-        # remove from utxo all transactions that are in the shortest subchain (blockchain[known_block_idx + 1:]) ?
+        # remove from utxo all transactions that are in the shortest subchain.
         for block in self.__blockchain[:known_block_idx + 1]:
             for tx in block.get_transactions():
                 if tx.get_input() in my_txid: # current block is the input of tx
@@ -397,6 +409,9 @@ class Node:
         
 
     def __update_mempool(self, new_blockchain: List[Block]) -> None:
+        """
+        This function updates the mempool of a node.
+        """
         for block in new_blockchain:
             for tx in block.get_transactions():
                 if tx in self.__mempool:
@@ -404,6 +419,9 @@ class Node:
 
     
     def __update_balance(self, new_blockchain: List[Block]) -> None: 
+        """
+        This function updates the balance of a node according to the new blocks.
+        """
         transactions = [tx for block in new_blockchain for tx in block.get_transactions()]
         for tx in transactions:
             if tx and tx.get_output() == self.get_address():
@@ -414,12 +432,17 @@ class Node:
  
 
     def __notify_of_block_to_connections(self) -> None:
-        # sent a notification of this block to the neighboring nodes of this node
+        """
+        This function sent a notification of this block to the neighboring nodes of this node
+        """
         for neighbor in self.__connections: 
             neighbor.notify_of_block(self.get_latest_hash(), self)
 
 
     def __update_mempool_utxo_balance(self, transactions: List[Transaction]) -> None:
+        """
+        This function updates the mempool transaction and the balance after mining a new block.
+        """
         # delelte transactions from mempool
         to_del_from_mempool = []
         for tx in self.__mempool: 
@@ -434,14 +457,4 @@ class Node:
                 if utxo.get_txid() == tx.get_input() and self.__balance:
                     self.__balance -= 1
                     to_del.append(tx)
-        # for tx in to_del:
-            # del self.__utxo[tx]
-            # del self.__my_utxo[tx] # why doesn work? 
 
-
-"""
-Importing this file should NOT execute code. It should only create definitions for the objects above.
-Write any tests you have in a different file.
-You may add additional methods, classes and files but be sure no to change the signatures of methods
-included in this template.
-"""
